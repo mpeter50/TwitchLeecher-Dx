@@ -6,7 +6,6 @@ using System.Collections.Specialized;
 using System.IO;
 using System.Linq;
 using System.Net;
-using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using TwitchLeecher.Core.Enums;
@@ -233,7 +232,7 @@ namespace TwitchLeecher.Services.Services
 
                             cancellationToken.ThrowIfCancellationRequested();
 
-                            _processingService.ConcatParts(log, setStatus, setProgress, vodPlaylist,
+                            var processingWarnings = _processingService.ConcatParts(log, setStatus, setProgress, vodPlaylist,
                                 disableConversion ? outputFile : concatFile);
 
                             if (!disableConversion)
@@ -243,7 +242,11 @@ namespace TwitchLeecher.Services.Services
                                     concatFile, outputFile, cropInfo);
                             }
 
-                            return downloadWarnings;
+                            List<string> warnings = new List<string>();
+                            warnings.AddRange(downloadWarnings);
+                            warnings.AddRange(processingWarnings);
+
+                            return warnings;
                         }, cancellationToken);
 
                         Task continueTask = downloadVideoTask.ContinueWith((Task<IEnumerable<string>> task) =>
@@ -523,18 +526,15 @@ namespace TwitchLeecher.Services.Services
                     {
                         try
                         {
-                            using (var downloadClient = new HttpClient())
+                            using (var downloadClient = new WebClient())
                             {
-                                byte[] bytes = downloadClient.GetByteArrayAsync(part.RemoteFile, CancellationToken.None)
-                                    .GetAwaiter().GetResult();
-
-                                Interlocked.Increment(ref completedPartDownloads);
+                                byte[] bytes = downloadClient.DownloadData(part.RemoteFile);
 
                                 FileSystem.DeleteFile(part.LocalFile);
 
                                 File.WriteAllBytes(part.LocalFile, bytes);
 
-                                long completed = Interlocked.Read(ref completedPartDownloads);
+                                long completed = Interlocked.Increment(ref completedPartDownloads);
 
                                 setProgress((double)completed / partsCount * 100);
 
@@ -547,9 +547,8 @@ namespace TwitchLeecher.Services.Services
                             {
                                 warnings.Add("Video contains missing frames");
                                 log($"{Environment.NewLine}File '{part.RemoteFile}' is not available, skipping");
-                                Interlocked.Increment(ref completedPartDownloads);
 
-                                long completed = Interlocked.Read(ref completedPartDownloads);
+                                long completed = Interlocked.Increment(ref completedPartDownloads);
 
                                 setProgress((double)completed / partsCount * 100);
 
